@@ -1,8 +1,5 @@
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <time.h>
-#include <ctype.h>
 
 #define MAX_ACCOUNTS 200
 #define ADMIN_PASS "admin123"
@@ -14,71 +11,34 @@
 // FD early break penalty (percentage of balance deducted once)
 #define FD_BREAK_PENALTY_PERCENT 1.0f
 
+// Account types
+// 1 = Savings, 2 = Current, 3 = Fixed Deposit
 struct Account {
     int accNo;
-    char name[100];
+    char name[50];
     float balance;
     int pin;
-    int type;               // 1 = Savings, 2 = Current, 3 = Fixed Deposit
+    int type;
     int fdMonthsRemaining;  // For FD: months remaining until maturity; 0 for non-FD
 };
 
-static struct Account accounts[MAX_ACCOUNTS];
-static int totalAccounts = 0;
-static int nextAccNo = 1000;
+struct Account accounts[MAX_ACCOUNTS];
+int totalAccounts = 0;
 
-// ---------- Utility Input Helpers ----------
-static void clear_stdin(void) {
-    int c;
-    while ((c = getchar()) != '\n' && c != EOF) {}
-}
+// ---------- Utilities ----------
 
-static void read_line(char *buf, size_t size) {
-    if (fgets(buf, (int)size, stdin) == NULL) { buf[0] = '\0'; return; }
-    size_t len = strlen(buf);
-    if (len > 0 && buf[len - 1] == '\n') buf[len - 1] = '\0';
-}
-
-static int read_int(const char *prompt) {
-    char buf[64];
-    int val;
-    while (1) {
-        if (prompt) printf("%s", prompt);
-        read_line(buf, sizeof(buf));
-        if (sscanf(buf, "%d", &val) == 1) return val;
-        printf("Invalid input. Please enter a valid integer.\n");
-    }
-}
-
-static float read_float(const char *prompt) {
-    char buf[64];
-    float val;
-    while (1) {
-        if (prompt) printf("%s", prompt);
-        read_line(buf, sizeof(buf));
-        if (sscanf(buf, "%f", &val) == 1) return val;
-        printf("Invalid input. Please enter a valid number.\n");
-    }
-}
-
-// ---------- Transaction Logging ----------
 void logTransaction(int accNo, const char *action, float amount, float balance) {
     char filename[64];
-    snprintf(filename, sizeof(filename), "%d_history.txt", accNo);
+    sprintf(filename, "%d_history.txt", accNo);
     FILE *fp = fopen(filename, "a");
     if (!fp) {
-        fprintf(stderr, "Error: could not open history file for account %d\n", accNo);
+        printf("Error: could not open history file for account %d\n", accNo);
         return;
     }
-    time_t t = time(NULL);
-    struct tm *tm = localtime(&t);
-    char timestr[64];
-    strftime(timestr, sizeof(timestr), "%Y-%m-%d %H:%M:%S", tm);
-    fprintf(fp, "%s | %s : %.2f | Balance: %.2f\n", timestr, action, amount, balance);
+    fprintf(fp, "%s: %.2f | Balance: %.2f\n", action, amount, balance);
     fclose(fp);
 }
 
-// ---------- Account Find / Verify ----------
 int findAccountIndexByAccNo(int accNo) {
     for (int i = 0; i < totalAccounts; i++) {
         if (accounts[i].accNo == accNo) return i;
@@ -92,7 +52,9 @@ int verifyPIN(int accNo) {
         printf("Account not found!\n");
         return -1;
     }
-    int pin = read_int("Enter PIN: ");
+    int pin;
+    printf("Enter PIN: ");
+    scanf("%d", &pin);
     if (pin != accounts[idx].pin) {
         printf("Incorrect PIN!\n");
         return -1;
@@ -101,40 +63,34 @@ int verifyPIN(int accNo) {
 }
 
 // ---------- File I/O ----------
-void loadAccounts(void) {
+
+void loadAccounts() {
     FILE *fp = fopen("accounts.txt", "r");
-    if (!fp) return;
-    totalAccounts = 0;
-    int maxAcc = nextAccNo - 1;
-    while (totalAccounts < MAX_ACCOUNTS) {
-        struct Account a;
-        int scanned = fscanf(fp, "%d %[^\t\n] %f %d %d %d",
-                             &a.accNo, a.name, &a.balance, &a.pin, &a.type, &a.fdMonthsRemaining);
-        if (scanned != 6) break;
-        accounts[totalAccounts++] = a;
-        if (a.accNo > maxAcc) maxAcc = a.accNo;
+    if (fp == NULL) return;
+    // Format: accNo name balance pin type fdMonthsRemaining
+    while (fscanf(fp, "%d %49s %f %d %d %d",
+                  &accounts[totalAccounts].accNo,
+                  accounts[totalAccounts].name,
+                  &accounts[totalAccounts].balance,
+                  &accounts[totalAccounts].pin,
+                  &accounts[totalAccounts].type,
+                  &accounts[totalAccounts].fdMonthsRemaining) == 6) {
+        totalAccounts++;
+        if (totalAccounts >= MAX_ACCOUNTS) break;
     }
     fclose(fp);
-    nextAccNo = maxAcc + 1;
 }
 
-void saveAccounts(void) {
+void saveAccounts() {
     FILE *fp = fopen("accounts.txt", "w");
     if (!fp) {
-        fprintf(stderr, "Error: could not save accounts file.\n");
+        printf("Error: could not save accounts file.\n");
         return;
     }
     for (int i = 0; i < totalAccounts; i++) {
-        // Write: accNo name balance pin type fdMonthsRemaining
-        // Use a single-word name or a name with underscores; we stored name with spaces, so replace newlines/extra tabs
-        char nameSafe[100];
-        strncpy(nameSafe, accounts[i].name, sizeof(nameSafe));
-        nameSafe[sizeof(nameSafe)-1] = '\0';
-        // replace newline or tabs with spaces
-        for (size_t j = 0; nameSafe[j]; j++) if (nameSafe[j] == '\t' || nameSafe[j] == '\n') nameSafe[j] = ' ';
-        fprintf(fp, "%d\t%s\t%.2f\t%d\t%d\t%d\n",
+        fprintf(fp, "%d %s %.2f %d %d %d\n",
                 accounts[i].accNo,
-                nameSafe,
+                accounts[i].name,
                 accounts[i].balance,
                 accounts[i].pin,
                 accounts[i].type,
@@ -144,42 +100,39 @@ void saveAccounts(void) {
 }
 
 // ---------- Account Creation ----------
-void createAccount(void) {
+
+void createAccount() {
     if (totalAccounts >= MAX_ACCOUNTS) {
         printf("Bank limit reached!\n");
         return;
     }
 
     struct Account a;
-    a.accNo = nextAccNo++;
+    a.accNo = 1000 + totalAccounts;
+
     printf("Enter name: ");
-    read_line(a.name, sizeof(a.name));
-    if (strlen(a.name) == 0) strncpy(a.name, "Unknown", sizeof(a.name));
+    scanf("%49s", a.name);
 
-    // PIN: enforce 4-digit
-    while (1) {
-        a.pin = read_int("Set a 4-digit PIN: ");
-        if (a.pin >= 1000 && a.pin <= 9999) break;
-        printf("PIN must be a 4-digit number.\n");
-    }
+    printf("Set a 4-digit PIN: ");
+    scanf("%d", &a.pin);
 
-    printf("Select Account Type:\n1. Savings\n2. Current\n3. Fixed Deposit\nChoice: ");
-    while (1) {
-        a.type = read_int(NULL);
-        if (a.type >= 1 && a.type <= 3) break;
-        printf("Invalid choice. Enter 1, 2, or 3: ");
-    }
+    printf("Select Account Type:\n");
+    printf("1. Savings\n2. Current\n3. Fixed Deposit\nChoice: ");
+    scanf("%d", &a.type);
 
     a.balance = 0.0f;
     a.fdMonthsRemaining = 0;
 
     if (a.type == 3) {
-        int months = read_int("Enter FD duration in months (e.g., 12): ");
+        int months;
+        float initial;
+        printf("Enter FD duration in months (e.g., 12): ");
+        scanf("%d", &months);
         if (months <= 0) months = 12;
         a.fdMonthsRemaining = months;
-        float initial;
-        initial = read_float("Enter initial deposit amount for FD: ");
-        if (initial < 0.0f) initial = 0.0f;
+        printf("Enter initial deposit amount for FD: ");
+        scanf("%f", &initial);
+        if (initial < 0) initial = 0;
         a.balance = initial;
         printf("FD created: Duration %d months, Initial Amount %.2f\n", a.fdMonthsRemaining, a.balance);
         logTransaction(a.accNo, "FD Created", a.balance, a.balance);
@@ -194,10 +147,14 @@ void createAccount(void) {
 }
 
 // ---------- Customer Operations ----------
-void deposit_op(int idx) {
-    float amt = read_float("Enter amount to deposit: ");
-    if (amt <= 0.0f) { printf("Amount must be positive.\n"); return; }
 
+void deposit_op(int idx) {
+    float amt;
+    printf("Enter amount to deposit: ");
+    scanf("%f", &amt);
+    if (amt <= 0) { printf("Amount must be positive.\n"); return; }
+
+    // FD allows deposit? Typically FDs don't allow top-ups; we disallow if FD active.
     if (accounts[idx].type == 3 && accounts[idx].fdMonthsRemaining > 0) {
         printf("Cannot deposit into active FD. Consider breaking FD or wait until maturity.\n");
         return;
@@ -210,8 +167,10 @@ void deposit_op(int idx) {
 }
 
 void withdraw_op(int idx) {
-    float amt = read_float("Enter amount to withdraw: ");
-    if (amt <= 0.0f) { printf("Amount must be positive.\n"); return; }
+    float amt;
+    printf("Enter amount to withdraw: ");
+    scanf("%f", &amt);
+    if (amt <= 0) { printf("Amount must be positive.\n"); return; }
 
     if (accounts[idx].type == 3 && accounts[idx].fdMonthsRemaining > 0) {
         printf("Withdrawal from active FD is not allowed. Use 'Break FD' option.\n");
@@ -240,7 +199,10 @@ void checkBalance_op(int idx) {
 }
 
 void transfer_op(int idx) {
-    int toAcc = read_int("Enter receiver account number: ");
+    int toAcc;
+    float amt;
+    printf("Enter receiver account number: ");
+    scanf("%d", &toAcc);
     int toIdx = findAccountIndexByAccNo(toAcc);
     if (toIdx == -1) { printf("Receiver account not found!\n"); return; }
 
@@ -249,8 +211,9 @@ void transfer_op(int idx) {
         return;
     }
 
-    float amt = read_float("Enter amount to transfer: ");
-    if (amt <= 0.0f) { printf("Amount must be positive.\n"); return; }
+    printf("Enter amount to transfer: ");
+    scanf("%f", &amt);
+    if (amt <= 0) { printf("Amount must be positive.\n"); return; }
 
     if (accounts[idx].balance >= amt) {
         accounts[idx].balance -= amt;
@@ -266,16 +229,16 @@ void transfer_op(int idx) {
 
 void viewHistory(int accNo) {
     char filename[64];
-    snprintf(filename, sizeof(filename), "%d_history.txt", accNo);
+    sprintf(filename, "%d_history.txt", accNo);
     FILE *fp = fopen(filename, "r");
-    if (!fp) {
+    if (fp == NULL) {
         printf("No transaction history found!\n");
         return;
     }
-    printf("\n--- Transaction History for %d ---\n", accNo);
+    printf("\n--- Transaction History ---\n");
     char line[256];
     while (fgets(line, sizeof(line), fp)) {
-        fputs(line, stdout);
+        printf("%s", line);
     }
     fclose(fp);
 }
@@ -287,7 +250,8 @@ void breakFD_op(int idx) {
     }
     printf("Breaking FD will apply a %.2f%% penalty on the current balance and convert to Savings.\n",
            FD_BREAK_PENALTY_PERCENT);
-    int confirm = read_int("Confirm break FD? (1 = Yes, 0 = No): ");
+    printf("Confirm break FD? (1 = Yes, 0 = No): ");
+    int confirm; scanf("%d", &confirm);
     if (confirm != 1) { printf("FD break cancelled.\n"); return; }
 
     float penalty = accounts[idx].balance * (FD_BREAK_PENALTY_PERCENT / 100.0f);
@@ -302,7 +266,8 @@ void breakFD_op(int idx) {
 }
 
 // ---------- Interest & Time Progression ----------
-void applyMonthlyInterestToAll(void) {
+
+void applyMonthlyInterestToAll() {
     float savingsMonthlyRate = SAVINGS_ANNUAL_RATE / 12.0f;
     float fdMonthlyRate = FD_ANNUAL_RATE / 12.0f;
 
@@ -312,13 +277,13 @@ void applyMonthlyInterestToAll(void) {
     for (int i = 0; i < totalAccounts; i++) {
         if (accounts[i].type == 1) {
             float interest = accounts[i].balance * (savingsMonthlyRate / 100.0f);
-            if (interest > 0.0f) {
+            if (interest > 0) {
                 accounts[i].balance += interest;
                 logTransaction(accounts[i].accNo, "Interest Added (Savings)", interest, accounts[i].balance);
             }
         } else if (accounts[i].type == 3) {
             float interest = accounts[i].balance * (fdMonthlyRate / 100.0f);
-            if (interest > 0.0f) {
+            if (interest > 0) {
                 accounts[i].balance += interest;
                 logTransaction(accounts[i].accNo, "Interest Added (FD)", interest, accounts[i].balance);
             }
@@ -347,23 +312,25 @@ void advanceMonths(int months) {
 }
 
 // ---------- Admin Operations ----------
-void viewAllAccounts(void) {
+
+void viewAllAccounts() {
     printf("\n--- All Accounts ---\n");
     for (int i = 0; i < totalAccounts; i++) {
         const char *typeStr = (accounts[i].type == 1 ? "Savings" :
                                accounts[i].type == 2 ? "Current" : "FD");
-        // Mask PIN for basic security
         printf("AccNo: %d | Name: %s | Type: %s | Balance: %.2f",
                accounts[i].accNo, accounts[i].name, typeStr, accounts[i].balance);
         if (accounts[i].type == 3) {
             printf(" | FD Months Remaining: %d", accounts[i].fdMonthsRemaining);
         }
-        printf(" | PIN: ****\n");
+        printf(" | PIN: %d\n", accounts[i].pin);
     }
 }
 
-void deleteAccount(void) {
-    int acc = read_int("Enter account number to delete: ");
+void deleteAccount() {
+    int acc;
+    printf("Enter account number to delete: ");
+    scanf("%d", &acc);
     int idx = findAccountIndexByAccNo(acc);
     if (idx == -1) { printf("Account not found!\n"); return; }
 
@@ -373,23 +340,20 @@ void deleteAccount(void) {
     printf("Account deleted successfully!\n");
 }
 
-void resetPIN(void) {
-    int acc = read_int("Enter account number to reset PIN: ");
+void resetPIN() {
+    int acc, newPin;
+    printf("Enter account number to reset PIN: ");
+    scanf("%d", &acc);
     int idx = findAccountIndexByAccNo(acc);
     if (idx == -1) { printf("Account not found!\n"); return; }
-
-    int newPin;
-    while (1) {
-        newPin = read_int("Enter new 4-digit PIN: ");
-        if (newPin >= 1000 && newPin <= 9999) break;
-        printf("PIN must be a 4-digit number.\n");
-    }
+    printf("Enter new PIN: ");
+    scanf("%d", &newPin);
     accounts[idx].pin = newPin;
     saveAccounts();
     printf("PIN reset successfully!\n");
 }
 
-void adminMenu(void) {
+void adminMenu() {
     int choice;
     do {
         printf("\n--- Admin Menu ---\n");
@@ -399,14 +363,17 @@ void adminMenu(void) {
         printf("4. Apply Monthly Interest\n");
         printf("5. Advance Months (apply interest + reduce FD months)\n");
         printf("6. Exit Admin\n");
-        choice = read_int("Enter choice: ");
+        printf("Enter choice: ");
+        scanf("%d", &choice);
         switch (choice) {
             case 1: viewAllAccounts(); break;
             case 2: deleteAccount(); break;
             case 3: resetPIN(); break;
             case 4: applyMonthlyInterestToAll(); break;
             case 5: {
-                int months = read_int("Enter number of months to advance: ");
+                int months;
+                printf("Enter number of months to advance: ");
+                scanf("%d", &months);
                 advanceMonths(months);
                 break;
             }
@@ -417,6 +384,7 @@ void adminMenu(void) {
 }
 
 // ---------- Customer Menu ----------
+
 void customerMenu(int idx) {
     int choice;
     do {
@@ -433,7 +401,8 @@ void customerMenu(int idx) {
             printf("6. Exit Customer\n");
         }
 
-        choice = read_int("Enter choice: ");
+        printf("Enter choice: ");
+        scanf("%d", &choice);
 
         if (accounts[idx].type == 3 && accounts[idx].fdMonthsRemaining > 0) {
             switch (choice) {
@@ -463,7 +432,8 @@ void customerMenu(int idx) {
 }
 
 // ---------- Main ----------
-int main(void) {
+
+int main() {
     loadAccounts();
 
     int choice;
@@ -473,20 +443,23 @@ int main(void) {
         printf("2. Customer Login\n");
         printf("3. Admin Login\n");
         printf("4. Exit\n");
-        choice = read_int("Enter choice: ");
+        printf("Enter choice: ");
+        scanf("%d", &choice);
 
         switch (choice) {
             case 1: createAccount(); break;
             case 2: {
-                int acc = read_int("Enter account number: ");
+                int acc;
+                printf("Enter account number: ");
+                scanf("%d", &acc);
                 int idx = verifyPIN(acc);
                 if (idx != -1) customerMenu(idx);
                 break;
             }
             case 3: {
-                char pass[128];
+                char pass[64];
                 printf("Enter Admin Password: ");
-                read_line(pass, sizeof(pass));
+                scanf("%63s", pass);
                 if (strcmp(pass, ADMIN_PASS) == 0) adminMenu();
                 else printf("Incorrect Admin Password!\n");
                 break;
